@@ -163,7 +163,8 @@ public sealed class MainForm : Form
                     }
                 }
             }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (TaskCanceledException) { _kmoniMessage = "タイムアウト"; }
             catch (Exception ex) { _kmoniMessage = "エラー: " + ex.Message; }
 
             try { await Task.Delay(1000, ct); }

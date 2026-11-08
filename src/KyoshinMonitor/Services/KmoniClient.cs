@@ -80,7 +80,7 @@ public sealed class KmoniClient : IDisposable
             g.DrawImage(img, 0, 0, img.Width, img.Height);
             return bmp;
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return null; }
     }
 
