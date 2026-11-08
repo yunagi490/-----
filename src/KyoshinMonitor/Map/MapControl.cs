@@ -262,6 +262,7 @@ public sealed class MapControl : Control
 
         var bmp = new Bitmap(ClientSize.Width, ClientSize.Height, PixelFormat.Format32bppArgb);
         var brushes = new Dictionary<int, SolidBrush>();
+        using var outline = new Pen(Color.FromArgb(170, 10, 12, 18), 1f);
         try
         {
             using var g = Graphics.FromImage(bmp);
@@ -274,7 +275,9 @@ public sealed class MapControl : Control
 
                 var key = d.Color.ToArgb();
                 if (!brushes.TryGetValue(key, out var brush)) brushes[key] = brush = new SolidBrush(d.Color);
-                g.FillEllipse(brush, p.X - 2.5f, p.Y - 2.5f, 5f, 5f);
+                var size = d.Rank >= 130 ? 6f : 4.5f; // 震度の高い点は少し大きく描く
+                g.FillEllipse(brush, p.X - size / 2, p.Y - size / 2, size, size);
+                g.DrawEllipse(outline, p.X - size / 2, p.Y - size / 2, size, size);
             }
         }
         finally
