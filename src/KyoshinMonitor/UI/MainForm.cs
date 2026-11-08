@@ -73,6 +73,7 @@ public sealed class MainForm : Form
     {
         Icon = SystemIcons.Warning,
         Text = "強震モニタ",
+
         Visible = true,
     };
 
@@ -88,10 +89,14 @@ public sealed class MainForm : Form
     private bool _eewConnected;
     private bool _p2pConnected;
     private string _kmoniMessage = "待機中";
+    private readonly DateTime? _replayStart;
+    private readonly System.Diagnostics.Stopwatch _replayClock = System.Diagnostics.Stopwatch.StartNew();
 
-    public MainForm()
+    public MainForm(DateTime? replayStart = null)
     {
         Text = "強震モニタ";
+        _replayStart = replayStart;
+        Text = replayStart is null ? "強震モニタ" : "強震モニタ [リプレイ]";
         ClientSize = new Size(1000, 620);
         StartPosition = FormStartPosition.CenterScreen;
 
@@ -140,10 +145,13 @@ public sealed class MainForm : Form
         {
             try
             {
-                var latest = await _kmoni.GetLatestTimeAsync(ct);
+                var latest = _replayStart is { } rs
+                    ? rs + _replayClock.Elapsed
+                    : await _kmoni.GetLatestTimeAsync(ct);
+                latest = new DateTime(latest.Ticks - latest.Ticks % TimeSpan.TicksPerSecond); // 秒未満を切り捨て
                 if (latest != last)
                 {
-                    var frame = await _kmoni.RenderAsync(latest, _eewActive, ct);
+                    var frame = await _kmoni.RenderAsync(latest, _eewActive || _replayStart is not null, ct);
                     if (frame is not null)
                     {
                         last = latest;
@@ -159,7 +167,7 @@ public sealed class MainForm : Form
                     else
                     {
                         frame?.Dispose();
-                        _kmoniMessage = "画像取得失敗";
+                        _kmoniMessage = "画像取得失敗: " + _kmoni.LastError;
                     }
                 }
             }
@@ -309,7 +317,7 @@ public sealed class MainForm : Form
 
         var kt = _kmoniTime == DateTime.MinValue ? "--:--:--" : _kmoniTime.ToString("HH:mm:ss");
         _status.Text =
-            $"強震モニタ {kt} ({_kmoniMessage})  |  EEW: {(_eewConnected ? "接続中" : "未接続")}  |  地震情報: {(_p2pConnected ? "接続中" : "未接続")}";
+            (_replayStart is null ? "" : "[リプレイ] ") + $"強震モニタ {kt} ({_kmoniMessage})  |  EEW: {(_eewConnected ? "接続中" : "未接続")}  |  地震情報: {(_p2pConnected ? "接続中" : "未接続")}";
     }
 
     private void UiPost(Action a)

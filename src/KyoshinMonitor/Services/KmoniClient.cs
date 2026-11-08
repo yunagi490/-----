@@ -10,6 +10,9 @@ namespace KyoshinMonitor;
 /// </summary>
 public sealed class KmoniClient : IDisposable
 {
+    /// <summary>直近の取得失敗の内容 (デバッグ表示用)</summary>
+    public string LastError { get; private set; } = "";
+
     private const string Host = "http://www.kmoni.bosai.go.jp";
 
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
@@ -37,7 +40,7 @@ public sealed class KmoniClient : IDisposable
 
         _baseMap ??= await FetchGifAsync($"{Host}/data/map_img/CommonImg/base_map_w.gif", ct);
 
-        var realtimeTask = FetchGifAsync($"{Host}/data/map_img/RealTimeImg/jma_s/{d}/{ts}.jma_s.gif", ct);
+        var realtimeTask = FetchGifAsync($"{Host}/data/map_img/RealTimeImg/jma_s/{d}/{ts}.jma_s.gif", ct, record: true);
         Task<Bitmap?> estTask = includeEew
             ? FetchGifAsync($"{Host}/data/map_img/EstShindoImg/eew/{d}/{ts}.eew.gif", ct)
             : Task.FromResult<Bitmap?>(null);
@@ -66,12 +69,17 @@ public sealed class KmoniClient : IDisposable
         return frame;
     }
 
-    private async Task<Bitmap?> FetchGifAsync(string url, CancellationToken ct)
+    private async Task<Bitmap?> FetchGifAsync(string url, CancellationToken ct, bool record = false)
     {
         try
         {
             using var res = await _http.GetAsync(url, ct);
-            if (!res.IsSuccessStatusCode) return null; // 404 = その秒のデータなし/EEWなし
+            if (!res.IsSuccessStatusCode)
+            {
+                // 404 = その秒のデータなし/EEWなし
+                if (record) LastError = $"HTTP {(int)res.StatusCode} {url[(url.LastIndexOf('/') + 1)..]}";
+                return null;
+            }
             var bytes = await res.Content.ReadAsByteArrayAsync(ct);
             using var ms = new MemoryStream(bytes);
             using var img = Image.FromStream(ms);
@@ -88,5 +96,6 @@ public sealed class KmoniClient : IDisposable
     {
         _http.Dispose();
         _baseMap?.Dispose();
+        
     }
 }
