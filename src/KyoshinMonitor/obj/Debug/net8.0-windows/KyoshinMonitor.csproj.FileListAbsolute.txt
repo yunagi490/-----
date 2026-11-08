@@ -13,3 +13,4 @@ G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonito
 G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.genruntimeconfig.cache
 G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\ref\KyoshinMonitor.dll
 G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.sourcelink.json
+G:\Git\強震モニタ\src\KyoshinMonitor\bin\Debug\net8.0-windows\Assets\prefectures.geojson

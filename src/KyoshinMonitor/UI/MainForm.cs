@@ -81,7 +81,7 @@ public sealed class MainForm : Form
         Visible = true,
     };
 
-    private readonly System.Windows.Forms.Timer _uiTimer = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer _uiTimer = new() { Interval = 250 };
 
     private readonly HashSet<string> _seenEew = new();
     private readonly HashSet<string> _seenQuake = new();
@@ -100,6 +100,7 @@ public sealed class MainForm : Form
     {
         Text = "強震モニタ";
         _replayStart = replayStart;
+        KeyPreview = true;
         Text = replayStart is null ? "強震モニタ" : "強震モニタ [リプレイ]";
         ClientSize = new Size(1000, 620);
         StartPosition = FormStartPosition.CenterScreen;
@@ -126,6 +127,39 @@ public sealed class MainForm : Form
         _ = Task.Run(() => WsRunner.RunAsync(new Uri(EewWsUrl), OnEewMessage, s => { _eewConnected = s; }, _cts.Token));
         _ = Task.Run(() => LoadQuakeHistoryAsync(_cts.Token));
         _ = Task.Run(() => WsRunner.RunAsync(new Uri(P2PWsUrl), OnQuakeMessage, s => { _p2pConnected = s; }, _cts.Token));
+    }
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.F9)
+        {
+            SimulateEew();
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
+    }
+
+    /// <summary>F9: 疑似EEW (静岡県西部・訓練扱い) を流して、パネル・通知・地図の表示を確認する</summary>
+    private void SimulateEew()
+    {
+        var jst = TimeSpan.FromHours(9);
+        var now = DateTimeOffset.UtcNow.ToOffset(jst);
+        var json = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["type"] = "jma_eew",
+            ["EventID"] = "TEST" + now.ToString("HHmmss"),
+            ["Serial"] = 1,
+            ["AnnouncedTime"] = now.ToString("yyyy/MM/dd HH:mm:ss"),
+            ["OriginTime"] = now.AddSeconds(-5).ToString("yyyy/MM/dd HH:mm:ss"),
+            ["Hypocenter"] = "テスト(静岡県西部)",
+            ["Latitude"] = 34.8,
+            ["Longitude"] = 137.9,
+            ["Magunitude"] = 5.7,
+            ["Depth"] = 40,
+            ["MaxIntensity"] = "5強",
+            ["isWarn"] = true,
+            ["isTraining"] = true,
+        });
+        OnEewMessage(json);
     }
 
     private void LoadMap()
@@ -329,10 +363,14 @@ public sealed class MainForm : Form
                 $"緊急地震速報({kind}) 第{eew.Serial}報{(eew.IsFinal ? " 最終" : "")}{(eew.IsTraining ? " [訓練]" : "")}\n" +
                 $"震源: {eew.Hypocenter}  M{eew.Magnitude:0.0}  深さ{eew.Depth}km\n" +
                 $"最大震度: {eew.MaxIntensity}";
+            _mapView.SetEew(eew.HasLocation
+                ? new EewMarker(eew.Latitude, eew.Longitude, eew.Depth, eew.OriginAt, eew.IsWarn)
+                : null);            
         }
         else
         {
             _eewActive = false;
+            _mapView.SetEew(null);
             _eewLabel.BackColor = Color.FromArgb(210, 40, 44, 52);
             _eewLabel.Text = eew is { IsCancel: true } ? "緊急地震速報は取り消されました" : "緊急地震速報は発表されていません";
         }

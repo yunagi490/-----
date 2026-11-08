@@ -2,6 +2,8 @@ using System.Drawing.Drawing2D;
 using System.Drawing;
 using System.Windows.Forms;
 namespace KyoshinMonitor.Map;
+/// <summary>地図に描くEEW (震源と、発生時刻からの波の広がり)</summary>
+public sealed record EewMarker(double Lat, double Lon, double DepthKm, DateTimeOffset OriginTime, bool IsWarn);
 
 /// <summary>専用地図 (ウェブメルカトル)。ベース地図はBitmapにキャッシュし、その上にオーバーレイを重ねる。</summary>
 public sealed class MapControl : Control
@@ -17,6 +19,12 @@ public sealed class MapControl : Control
     private GeoJsonMap? _map;
     private string _message = "地図データを読み込み中...";
     private Bitmap? _baseBitmap;
+    private EewMarker? _eew;
+
+    // 波の速さ(仮定)。気象庁の走時表とは一致しない概算値で、見た目の目安用。
+    private const double PWaveKmPerSec = 7.0;
+    private const double SWaveKmPerSec = 4.0;
+    private const double MaxDrawKm = 1500;
     private double _scale, _offsetX, _offsetY; // メルカトル平面(0..1) → 画面
 
     public MapControl()
@@ -38,6 +46,12 @@ public sealed class MapControl : Control
         _map = null;
         _message = message;
         RebuildBase();
+        Invalidate();
+    }
+    /// <summary>EEWの表示を更新する。null で消す。</summary>
+    public void SetEew(EewMarker? marker)
+    {
+        _eew = marker;
         Invalidate();
     }
 
@@ -130,7 +144,55 @@ public sealed class MapControl : Control
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         }
 
-        // ここに観測点・震源・EEWの円などのオーバーレイを描いていく
+        if(_eew is { } eew) DrawEew(g, eew);
+    }
+    private void DrawEew(Graphics g, EewMarker m)
+    {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        var center = LatLonToScreen(m.Lat, m.Lon);
+        var elapsed = (DateTimeOffset.Now - m.OriginTime).TotalSeconds;
+
+        if (elapsed >= 0)
+        {
+            // メルカトルでは、緯度ごとに距離の縮尺が cos(緯度) で変わる
+            var pxPerKm = _scale / (40075.0 * Math.Cos(m.Lat * Math.PI / 180.0));
+
+            var pKm = SurfaceRadiusKm(PWaveKmPerSec * elapsed, m.DepthKm);
+            var sKm = SurfaceRadiusKm(SWaveKmPerSec * elapsed, m.DepthKm);
+            if (sKm > 0 && sKm < MaxDrawKm)
+                DrawWave(g, center, (float)(sKm * pxPerKm), Color.FromArgb(255, 90, 90), Color.FromArgb(40, 255, 80, 80));
+            if (pKm > 0 && pKm < MaxDrawKm)
+                DrawWave(g, center, (float)(pKm * pxPerKm), Color.FromArgb(90, 170, 255), null);
+        }
+
+        // 震源 (×印)
+        const float r = 8f;
+        using var outline = new Pen(Color.White, 5f);
+        using var cross = new Pen(m.IsWarn ? Color.FromArgb(230, 30, 30) : Color.FromArgb(255, 150, 0), 3f);
+        foreach (var pen in new[] { outline, cross })
+        {
+            g.DrawLine(pen, center.X - r, center.Y - r, center.X + r, center.Y + r);
+            g.DrawLine(pen, center.X - r, center.Y + r, center.X + r, center.Y - r);
+        }
+    }
+
+    /// <summary>震源からの距離(深さ込み)を、地表での半径に直す</summary>
+    private static double SurfaceRadiusKm(double distanceKm, double depthKm)
+    {
+        var d2 = distanceKm * distanceKm - depthKm * depthKm;
+        return d2 > 0 ? Math.Sqrt(d2) : 0;
+    }
+
+    private static void DrawWave(Graphics g, PointF c, float radius, Color line, Color? fill)
+    {
+        var rect = new RectangleF(c.X - radius, c.Y - radius, radius * 2, radius * 2);
+        if (fill is { } f)
+        {
+            using var b = new SolidBrush(f);
+            g.FillEllipse(b, rect);
+        }
+        using var p = new Pen(line, 2f);
+        g.DrawEllipse(p, rect);
     }
 
     protected override void OnResize(EventArgs e)

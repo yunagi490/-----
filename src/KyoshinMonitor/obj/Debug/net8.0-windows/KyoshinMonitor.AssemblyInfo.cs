@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("KyoshinMonitor")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+34f27e606c05ce2282ec38447158f8ce2fbadad7")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1b0c7ce07edfaa0bc771075cef98d9330f4547df")]
 [assembly: System.Reflection.AssemblyProductAttribute("KyoshinMonitor")]
 [assembly: System.Reflection.AssemblyTitleAttribute("KyoshinMonitor")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -6,6 +6,9 @@ public sealed record EewInfo(
   string Hypocenter,
   double Magnitude,
   int Depth,
+  double Latitude,
+  double Longitude,
+  DateTimeOffset OriginAt,
   string MaxIntensity,
   bool IsWarn,
   bool IsFinal,
@@ -14,7 +17,8 @@ public sealed record EewInfo(
   DateTime AnnouncedAt,
   DateTime ReceivedAt)
 {
-  public string Key => $"{EventId}#{Serial}";
+    public string Key => $"{EventId}#{Serial}";
+    public bool HasLocation => Latitude != 0 || Longitude != 0;
 
   public static EewInfo? Parse(string json)
   {
@@ -33,6 +37,9 @@ public sealed record EewInfo(
         Str(r, "Hypocenter"),
         Num(r, "Magunitude"), // Wolfx側のスペルがこの綴り
         (int)Num(r, "Depth"),
+        Num(r, "Latitude"),
+        Num(r, "Longitude"),
+        ParseJst(Str(r, "OriginTime")),
         Str(r, "MaxIntensity"),
         Bool(r, "isWarn"),
         Bool(r, "isFinal"),
@@ -41,6 +48,12 @@ public sealed record EewInfo(
         announced,
         DateTime.Now);
   }
+    /// <summary>"yyyy/MM/dd HH:mm:ss" (日本時間) → DateTimeOffset。PCのタイムゾーンに依存させない。</summary>
+    private static DateTimeOffset ParseJst(string s) =>
+        DateTime.TryParseExact(s, "yyyy/MM/dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var t)
+            ? new DateTimeOffset(t, TimeSpan.FromHours(9))
+            : DateTimeOffset.MinValue;
     private static string Str(JsonElement e, string name) =>
       e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
   
