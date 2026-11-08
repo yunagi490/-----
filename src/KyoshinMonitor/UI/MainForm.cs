@@ -94,6 +94,10 @@ public sealed class MainForm : Form
     private bool _p2pConnected;
     private string _kmoniMessage = "待機中";
     private readonly DateTime? _replayStart;
+    private readonly ImageCalibration _calibration = ImageCalibration.LoadOrDefault();
+    private bool _calibrating = !ImageCalibration.HasSaved; // 保存済みの値がなければ、位置合わせから始める
+    private IReadOnlyList<RawDot> _rawDots = Array.Empty<RawDot>();
+    private int _imageWidth = 352, _imageHeight = 400;
     private readonly System.Diagnostics.Stopwatch _replayClock = System.Diagnostics.Stopwatch.StartNew();
 
     public MainForm(DateTime? replayStart = null)
@@ -161,7 +165,53 @@ public sealed class MainForm : Form
         });
         OnEewMessage(json);
     }
+        private void ApplyDots()
+    {
+        _mapView.SetStationDots(_rawDots, _calibration, useLandMask: !_calibrating);
+        _mapView.SetOverlayText(_calibrating
+            ? $"[位置合わせ] {_calibration}\n矢印: 移動 (Shiftで細かく / Ctrlで大きく)  PageUp/Down: 拡大縮小  Home/End: 縦だけ拡大縮小  M: 投影の切替  0: 初期値  S: 保存して終了"
+            : null);
+    }
 
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.F8)
+        {
+            _calibrating = !_calibrating;
+            ApplyDots();
+            return true;
+        }
+        if (_calibrating && HandleCalibrationKey(keyData)) return true;
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private bool HandleCalibrationKey(Keys keyData)
+    {
+        var key = keyData & Keys.KeyCode;
+        var step = (keyData & Keys.Control) != 0 ? 0.5 : (keyData & Keys.Shift) != 0 ? 0.01 : 0.05;
+
+        switch (key)
+        {
+            case Keys.Left: _calibration.Lon0 -= step; break;   // ドットを左へ
+            case Keys.Right: _calibration.Lon0 += step; break;
+            case Keys.Up: _calibration.Lat0 += step; break;     // ドットを上へ
+            case Keys.Down: _calibration.Lat0 -= step; break;
+            case Keys.PageUp: _calibration.ScaleAboutCenter(1.005, 1.005, _imageWidth, _imageHeight); break;
+            case Keys.PageDown: _calibration.ScaleAboutCenter(0.995, 0.995, _imageWidth, _imageHeight); break;
+            case Keys.Home: _calibration.ScaleAboutCenter(1, 1.005, _imageWidth, _imageHeight); break;
+            case Keys.End: _calibration.ScaleAboutCenter(1, 0.995, _imageWidth, _imageHeight); break;
+            case Keys.M: _calibration.ToggleMercator(_imageWidth, _imageHeight); break;
+            case Keys.D0:
+            case Keys.NumPad0: _calibration.Reset(); break;
+            case Keys.S:
+                _calibration.Save();
+                _calibrating = false;
+                break;
+            default: return false;
+        }
+        ApplyDots();
+        return true;
+    }
     private void LoadMap()
     {
     
@@ -201,22 +251,17 @@ public sealed class MainForm : Form
                 latest = new DateTime(latest.Ticks - latest.Ticks % TimeSpan.TicksPerSecond); // 秒未満を切り捨て
                 if (latest != last)
                 {
-                    var frame = await _kmoni.RenderAsync(latest, _eewActive || _replayStart is not null, ct);
-                    if (frame is not null)
+                    var ok = ShowKmoniImage
+                        ? await ShowImageFrameAsync(latest, ct)
+                        : await UpdateStationDotsAsync(latest, ct);
+                    if (ok)
                     {
                         last = latest;
                         _kmoniTime = latest;
                         _kmoniMessage = "受信中";
-                        UiPost(() =>
-                        {
-                            var old = _map.Image;
-                            _map.Image = frame;
-                            old?.Dispose();
-                        });
                     }
                     else
                     {
-                        frame?.Dispose();
                         _kmoniMessage = "画像取得失敗: " + _kmoni.LastError;
                     }
                 }
@@ -228,6 +273,39 @@ public sealed class MainForm : Form
             try { await Task.Delay(1000, ct); }
             catch (OperationCanceledException) { return; }
         }
+    }
+
+    /// <summary>強震モニタの画像をそのまま表示する (ShowKmoniImage = true のとき)</summary>
+    private async Task<bool> ShowImageFrameAsync(DateTime latest, CancellationToken ct)
+    {
+        var frame = await _kmoni.RenderAsync(latest, _eewActive || _replayStart is not null, ct);
+        if (frame is null) return false;
+        UiPost(() =>
+        {
+            var old = _map.Image;
+            _map.Image = frame;
+            old?.Dispose();
+        });
+        return true;
+    }
+
+    /// <summary>画像から観測点ドットを拾って、自前の地図に渡す</summary>
+    private async Task<bool> UpdateStationDotsAsync(DateTime latest, CancellationToken ct)
+    {
+        using var bmp = await _kmoni.FetchRealtimeAsync(latest, ct);
+        if (bmp is null) return false;
+
+        var dots = StationImage.ExtractDots(bmp);
+        var w = bmp.Width;
+        var h = bmp.Height;
+        UiPost(() =>
+        {
+            _rawDots = dots;
+            _imageWidth = w;
+            _imageHeight = h;
+            ApplyDots();
+        });
+        return true;
     }
 
     // ---------------------------------------------------------------- EEW

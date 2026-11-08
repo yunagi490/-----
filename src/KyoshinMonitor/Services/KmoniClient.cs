@@ -68,6 +68,13 @@ public sealed class KmoniClient : IDisposable
         if (ps is not null) g.DrawImage(ps, 0, 0, w, h);         // P波/S波到達円
         return frame;
     }
+    /// <summary>指定時刻のリアルタイム震度画像だけを取得する (観測点ドットの抽出用)</summary>
+    public Task<Bitmap?> FetchRealtimeAsync(DateTime t, CancellationToken ct)
+    {
+        var d = t.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        var ts = t.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        return FetchGifAsync($"{Host}/data/map_img/RealTimeImg/jma_s/{d}/{ts}.jma_s.gif", ct, record: true);
+    }
 
     private async Task<Bitmap?> FetchGifAsync(string url, CancellationToken ct, bool record = false)
     {

@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
-using System.Drawing;
-using System.Windows.Forms;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 namespace KyoshinMonitor.Map;
 /// <summary>地図に描くEEW (震源と、発生時刻からの波の広がり)</summary>
 public sealed record EewMarker(double Lat, double Lon, double DepthKm, DateTimeOffset OriginTime, bool IsWarn);
@@ -21,6 +21,12 @@ public sealed class MapControl : Control
     private Bitmap? _baseBitmap;
     private EewMarker? _eew;
 
+    private IReadOnlyList<RawDot> _rawDots = Array.Empty<RawDot>();
+    private ImageCalibration? _calibration;
+    private bool _useLandMask = true;
+    private Bitmap? _dotsBitmap;
+    private string? _overlayText;
+    private const int LandMargin = 6; // 陸地からこの距離(px)以内のドットだけ描く
     // 波の速さ(仮定)。気象庁の走時表とは一致しない概算値で、見た目の目安用。
     private const double PWaveKmPerSec = 7.0;
     private const double SWaveKmPerSec = 4.0;
@@ -52,6 +58,22 @@ public sealed class MapControl : Control
     public void SetEew(EewMarker? marker)
     {
         _eew = marker;
+        Invalidate();
+    }
+    /// <summary>観測点ドットを更新する。useLandMask が true なら、陸地の近くのドットだけを描く。</summary>
+    public void SetStationDots(IReadOnlyList<RawDot> dots, ImageCalibration calibration, bool useLandMask)
+    {
+        _rawDots = dots;
+        _calibration = calibration;
+        _useLandMask = useLandMask;
+        RebuildDots();
+        Invalidate();
+    }
+
+    /// <summary>地図の左下に表示する文字 (位置合わせの案内用)。null で消す。</summary>
+    public void SetOverlayText(string? text)
+    {
+        _overlayText = text;
         Invalidate();
     }
 
@@ -112,6 +134,7 @@ public sealed class MapControl : Control
             }
         }
         _baseBitmap = bmp;
+        RebuildDots();
     }
 
     /// <summary>画面上で0.6px未満しか動かない点は間引く。極端な緯度は無視する。</summary>
@@ -137,6 +160,7 @@ public sealed class MapControl : Control
         var g = e.Graphics;
         if (_baseBitmap is not null) g.DrawImageUnscaled(_baseBitmap, 0, 0);
         else g.Clear(SeaColor);
+        if (_dotsBitmap is not null) g.DrawImageUnscaled(_dotsBitmap, 0, 0);
 
         if (_map is null)
         {
@@ -144,8 +168,83 @@ public sealed class MapControl : Control
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         }
 
+        if (_overlayText is not null)
+        {
+            var box = new Rectangle(8, Height - 72, Width - 16, 64);
+            using var bg = new SolidBrush(Color.FromArgb(200, 18, 20, 26));
+            g.FillRectangle(bg, box);
+            TextRenderer.DrawText(g, _overlayText, Font, Rectangle.Inflate(box, -6, -4), Color.White,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+        }
+
         if(_eew is { } eew) DrawEew(g, eew);
     }
+    private void RebuildDots()
+    {
+        _dotsBitmap?.Dispose();
+        _dotsBitmap = null;
+        if (_calibration is null || _rawDots.Count == 0 || _scale == 0 || ClientSize.Width < 2 || ClientSize.Height < 2) return;
+
+        byte[]? land = null;
+        var stride = 0;
+        if (_useLandMask && _map is not null && _baseBitmap is not null)
+            (land, stride) = ReadPixels(_baseBitmap);
+
+        var bmp = new Bitmap(ClientSize.Width, ClientSize.Height, PixelFormat.Format32bppArgb);
+        var brushes = new Dictionary<int, SolidBrush>();
+        try
+        {
+            using var g = Graphics.FromImage(bmp);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (var d in _rawDots)
+            {
+                var (lat, lon) = _calibration.ToLatLon(d.X, d.Y);
+                var p = LatLonToScreen(lat, lon);
+                if (land is not null && !NearLand(land, stride, p)) continue;
+
+                var key = d.Color.ToArgb();
+                if (!brushes.TryGetValue(key, out var brush)) brushes[key] = brush = new SolidBrush(d.Color);
+                g.FillEllipse(brush, p.X - 2.5f, p.Y - 2.5f, 5f, 5f);
+            }
+        }
+        finally
+        {
+            foreach (var b in brushes.Values) b.Dispose();
+        }
+        _dotsBitmap = bmp;
+    }
+
+    private static (byte[] Bytes, int Stride) ReadPixels(Bitmap bmp)
+    {
+        var data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var bytes = new byte[data.Stride * data.Height];
+            Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
+            return (bytes, data.Stride);
+        }
+        finally
+        {
+            bmp.UnlockBits(data);
+        }
+    }
+
+    /// <summary>点の周囲に、海の色以外 (陸地や県境) のピクセルがあるか</summary>
+    private bool NearLand(byte[] px, int stride, PointF p)
+    {
+        var cx = (int)p.X;
+        var cy = (int)p.Y;
+        for (var y = Math.Max(0, cy - LandMargin); y <= Math.Min(ClientSize.Height - 1, cy + LandMargin); y++)
+        {
+            for (var x = Math.Max(0, cx - LandMargin); x <= Math.Min(ClientSize.Width - 1, cx + LandMargin); x++)
+            {
+                var i = y * stride + x * 4;
+                if (px[i] != SeaColor.B || px[i + 1] != SeaColor.G || px[i + 2] != SeaColor.R) return true;
+            }
+        }
+        return false;
+    }
+
     private void DrawEew(Graphics g, EewMarker m)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -203,7 +302,11 @@ public sealed class MapControl : Control
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _baseBitmap?.Dispose();
+        if (disposing)
+        {
+            _baseBitmap?.Dispose();
+            _dotsBitmap?.Dispose();
+        }
         base.Dispose(disposing);
     }
 }
