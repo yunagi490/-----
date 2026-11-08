@@ -96,6 +96,7 @@ public sealed class MainForm : Form
     private readonly DateTime? _replayStart;
     private readonly ImageCalibration _calibration = ImageCalibration.LoadOrDefault();
     private bool _calibrating = !ImageCalibration.HasSaved; // 保存済みの値がなければ、位置合わせから始める
+    private string _fitInfo = "";
     private IReadOnlyList<RawDot> _rawDots = Array.Empty<RawDot>();
     private int _imageWidth = 352, _imageHeight = 400;
     private readonly System.Diagnostics.Stopwatch _replayClock = System.Diagnostics.Stopwatch.StartNew();
@@ -169,7 +170,7 @@ public sealed class MainForm : Form
     {
         _mapView.SetStationDots(_rawDots, _calibration, useLandMask: !_calibrating);
         _mapView.SetOverlayText(_calibrating
-            ? $"[位置合わせ] {_calibration}\n矢印: 移動 (Shiftで細かく / Ctrlで大きく)  PageUp/Down: 拡大縮小  Home/End: 縦だけ拡大縮小  M: 投影の切替  0: 初期値  S: 保存して終了"
+            ? $"[位置合わせ] {_calibration}\nA: 自動で合わせる 矢印: 移動 (Shiftで細かく / Ctrlで大きく)  PageUp/Down: 拡大縮小  Home/End: 縦だけ拡大縮小  M: 投影の切替  0: 初期値  S: 保存して終了"+ (_fitInfo.Length > 0 ? "\n" + _fitInfo : "")
             : null);
     }
 
@@ -199,6 +200,18 @@ public sealed class MainForm : Form
             case Keys.PageUp: _calibration.ScaleAboutCenter(1.005, 1.005, _imageWidth, _imageHeight); break;
             case Keys.PageDown: _calibration.ScaleAboutCenter(0.995, 0.995, _imageWidth, _imageHeight); break;
             case Keys.Home: _calibration.ScaleAboutCenter(1, 1.005, _imageWidth, _imageHeight); break;
+            case Keys.A:
+            {
+                // 今の投影と、もう一方の投影の両方で探して、陸地に載った割合が高いほうを採用する
+                var cur = _calibration.Clone();
+                var other = _calibration.Clone();
+                other.ToggleMercator(_imageWidth, _imageHeight);
+                var s1 = _mapView.AutoFit(cur);
+                var s2 = _mapView.AutoFit(other);
+                _calibration.CopyFrom(s2 > s1 ? other : cur);
+                _fitInfo = $"自動調整: 陸地に載ったドット {Math.Max(s1, s2):P0}";
+                break;
+            }
             case Keys.End: _calibration.ScaleAboutCenter(1, 0.995, _imageWidth, _imageHeight); break;
             case Keys.M: _calibration.ToggleMercator(_imageWidth, _imageHeight); break;
             case Keys.D0:

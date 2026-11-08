@@ -76,6 +76,76 @@ public sealed class MapControl : Control
         _overlayText = text;
         Invalidate();
     }
+    /// <summary>
+    /// 位置合わせの自動調整。陸地の上に載るドットが最も多くなるように、
+    /// パラメーターを少しずつ動かして探す (最初は大きく、改善しなければ細かく)。
+    /// 結果は cal に書き込まれ、最終的に陸地に載ったドットの割合(0〜1)を返す。
+    /// </summary>
+    public double AutoFit(ImageCalibration cal)
+    {
+        if (_map is null || _baseBitmap is null || _rawDots.Count == 0 || _scale == 0) return 0;
+        var (land, stride) = ReadPixels(_baseBitmap);
+        var dots = _rawDots;
+
+        int Score(int margin)
+        {
+            var n = 0;
+            foreach (var d in dots)
+            {
+                var (lat, lon) = cal.ToLatLon(d.X, d.Y);
+                if (Math.Abs(lat) > 85) continue;
+                if (NearLand(land, stride, LatLonToScreen(lat, lon), margin)) n++;
+            }
+            return n;
+        }
+
+        double Get(int i) => i switch { 0 => cal.Lon0, 1 => cal.Lat0, 2 => cal.LonPerPx, _ => cal.LatPerPx };
+
+        void Set(int i, double v)
+        {
+            switch (i)
+            {
+                case 0: cal.Lon0 = v; break;
+                case 1: cal.Lat0 = v; break;
+                // 点が1か所に潰れるのを防ぐため、拡大率には範囲を設ける
+                case 2: cal.LonPerPx = Math.Clamp(v, 0.040, 0.056); break;
+                default: cal.LatPerPx = Math.Clamp(v, 0.030, 0.075); break;
+            }
+        }
+
+        // 探索幅: 左端経度, 上端緯度 (度) / 経度あたり, 緯度あたり (度/px)
+        var steps = new[] { 1.0, 1.0, 0.002, 0.002 };
+        for (var iter = 0; iter < 300 && steps[0] > 0.004; iter++)
+        {
+            // 最初は海岸線から離れていても陸地とみなして大づかみに合わせ、だんだん厳しくする
+            var margin = steps[0] > 0.2 ? 6 : steps[0] > 0.05 ? 3 : 1;
+            var best = Score(margin);
+            var improved = false;
+            for (var i = 0; i < 4; i++)
+            {
+                foreach (var sign in new[] { 1.0, -1.0 })
+                {
+                    var before = Get(i);
+                    Set(i, before + sign * steps[i]);
+                    var s = Score(margin);
+                    if (s > best)
+                    {
+                        best = s;
+                        improved = true;
+                    }
+                    else
+                    {
+                        Set(i, before);
+                    }
+                }
+            }
+            if (!improved)
+            {
+                for (var i = 0; i < 4; i++) steps[i] *= 0.5;
+            }
+        }
+        return Score(1) / (double)dots.Count;
+    }
 
     /// <summary>緯度経度 → 画面座標 (観測点・震源・EEWの円などの描画で使う)</summary>
     public PointF LatLonToScreen(double lat, double lon)
@@ -170,7 +240,7 @@ public sealed class MapControl : Control
 
         if (_overlayText is not null)
         {
-            var box = new Rectangle(8, Height - 72, Width - 16, 64);
+            var box = new Rectangle(8, Height - 96, Width - 16, 88);
             using var bg = new SolidBrush(Color.FromArgb(200, 18, 20, 26));
             g.FillRectangle(bg, box);
             TextRenderer.DrawText(g, _overlayText, Font, Rectangle.Inflate(box, -6, -4), Color.White,
@@ -200,7 +270,7 @@ public sealed class MapControl : Control
             {
                 var (lat, lon) = _calibration.ToLatLon(d.X, d.Y);
                 var p = LatLonToScreen(lat, lon);
-                if (land is not null && !NearLand(land, stride, p)) continue;
+                if (land is not null && !NearLand(land, stride, p, LandMargin)) continue;
 
                 var key = d.Color.ToArgb();
                 if (!brushes.TryGetValue(key, out var brush)) brushes[key] = brush = new SolidBrush(d.Color);
@@ -230,13 +300,13 @@ public sealed class MapControl : Control
     }
 
     /// <summary>点の周囲に、海の色以外 (陸地や県境) のピクセルがあるか</summary>
-    private bool NearLand(byte[] px, int stride, PointF p)
+    private bool NearLand(byte[] px, int stride, PointF p, int margin)
     {
         var cx = (int)p.X;
         var cy = (int)p.Y;
-        for (var y = Math.Max(0, cy - LandMargin); y <= Math.Min(ClientSize.Height - 1, cy + LandMargin); y++)
+        for (var y = Math.Max(0, cy - margin); y <= Math.Min(ClientSize.Height - 1, cy + margin); y++)
         {
-            for (var x = Math.Max(0, cx - LandMargin); x <= Math.Min(ClientSize.Width - 1, cx + LandMargin); x++)
+            for (var x = Math.Max(0, cx - margin); x <= Math.Min(ClientSize.Width - 1, cx + margin); x++)
             {
                 var i = y * stride + x * 4;
                 if (px[i] != SeaColor.B || px[i + 1] != SeaColor.G || px[i + 2] != SeaColor.R) return true;

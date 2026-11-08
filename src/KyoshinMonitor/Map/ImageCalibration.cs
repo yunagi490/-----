@@ -65,6 +65,16 @@ public sealed class ImageCalibration
             Lat0 = cLat + h / 2.0 * LatPerPx;
         }
     }
+    public ImageCalibration Clone() => (ImageCalibration)MemberwiseClone();
+
+    public void CopyFrom(ImageCalibration o)
+    {
+        Lon0 = o.Lon0;
+        Lat0 = o.Lat0;
+        LonPerPx = o.LonPerPx;
+        LatPerPx = o.LatPerPx;
+        Mercator = o.Mercator;
+    }
 
     public void Reset()
     {
