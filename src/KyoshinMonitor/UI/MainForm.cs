@@ -1,5 +1,5 @@
 using System.Drawing.Drawing2D;
-using System.Net.Http;
+using KyoshinMonitor.Map;
 using System.Text.Json;
 
 namespace KyoshinMonitor;
@@ -19,6 +19,10 @@ internal sealed class PixelBox : PictureBox
 
 public sealed class MainForm : Form
 {
+/// <summary>true: 強震モニタの画像をそのまま表示 / false: 専用地図 (観測点の描画は未実装)</summary>
+    private const bool ShowKmoniImage = false;
+
+    private readonly MapControl _mapView = new() { Dock = DockStyle.Fill };
     private const string EewWsUrl = "wss://ws-api.wolfx.jp/jma_eew";
     private const string P2PWsUrl = "wss://api.p2pquake.net/v2/ws";
     private const string P2PHistoryUrl = "https://api.p2pquake.net/v2/history?codes=551&limit=30";
@@ -35,7 +39,7 @@ public sealed class MainForm : Form
 
     private readonly PixelBox _map = new()
     {
-        Dock = DockStyle.Left,
+        Dock = DockStyle.Fill,
         Width = 560,
         SizeMode = PictureBoxSizeMode.Zoom,
         BackColor = Color.FromArgb(20, 24, 32),
@@ -43,22 +47,20 @@ public sealed class MainForm : Form
 
     private readonly Label _eewLabel = new()
     {
-        Dock = DockStyle.Top,
-        Height = 130,
-        Font = new Font("Yu Gothic UI", 13f, FontStyle.Bold),
+        AutoSize = false,
+        Location = new Point(8, 8),
+        Size = new Size(380, 84),
+        Font = new Font("Yu Gothic UI", 12f, FontStyle.Bold),
         ForeColor = Color.White,
-        BackColor = Color.FromArgb(40, 44, 52),
-        Padding = new Padding(10),
-        Text = "緊急地震速報: なし",
+        BackColor = Color.FromArgb(210, 40, 44, 52),
+        Padding = new Padding(8),
+        Text = "緊急地震速報は発表されていません",        
     };
 
-    private readonly ListView _list = new()
+    private readonly QuakeListBox _list = new()
     {
-        Dock = DockStyle.Fill,
-        View = View.Details,
-        FullRowSelect = true,
-        GridLines = true,
-        Font = new Font("Yu Gothic UI", 10f),
+        Dock = DockStyle.Right,
+        Width = 340,
     };
 
     private readonly Label _status = new()
@@ -67,6 +69,8 @@ public sealed class MainForm : Form
         Height = 24,
         TextAlign = ContentAlignment.MiddleLeft,
         Padding = new Padding(6, 0, 0, 0),
+        BackColor = Color.FromArgb(18, 20, 26),
+        ForeColor = Color.FromArgb(180, 186, 198),
     };
 
     private readonly NotifyIcon _tray = new()
@@ -100,19 +104,15 @@ public sealed class MainForm : Form
         ClientSize = new Size(1000, 620);
         StartPosition = FormStartPosition.CenterScreen;
 
-        _list.Columns.Add("発生時刻", 150);
-        _list.Columns.Add("震源", 140);
-        _list.Columns.Add("M", 45);
-        _list.Columns.Add("深さ", 60);
-        _list.Columns.Add("最大震度", 70);
+        BackColor = Color.FromArgb(24, 26, 32);
+        _map.Visible = ShowKmoniImage;
+        Control mapHost = ShowKmoniImage ? _map : _mapView;
+        mapHost.Controls.Add(_eewLabel); // EEWバナーは地図の左上に重ねる
 
-        var right = new Panel { Dock = DockStyle.Fill };
-        right.Controls.Add(_list);
-        right.Controls.Add(_eewLabel);
-
-        Controls.Add(right);
-        Controls.Add(_map);
-        Controls.Add(_status);
+        Controls.Add(_map);    // Fill (先に追加)
+        Controls.Add(_mapView); // 
+        Controls.Add(_list);   // Right
+        Controls.Add(_status); // Bottom
 
         _uiTimer.Tick += (_, _) => RefreshUi();
         _uiTimer.Start();
@@ -121,11 +121,27 @@ public sealed class MainForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+        LoadMap();
         _ = Task.Run(() => KmoniLoopAsync(_cts.Token));
         _ = Task.Run(() => WsRunner.RunAsync(new Uri(EewWsUrl), OnEewMessage, s => { _eewConnected = s; }, _cts.Token));
         _ = Task.Run(() => LoadQuakeHistoryAsync(_cts.Token));
         _ = Task.Run(() => WsRunner.RunAsync(new Uri(P2PWsUrl), OnQuakeMessage, s => { _p2pConnected = s; }, _cts.Token));
     }
+
+    private void LoadMap()
+    {
+    
+        var path = Path.Combine(AppContext.BaseDirectory, "Assets", "prefectures.geojson");
+        try
+        {
+            _mapView.SetMap(GeoJsonMap.Load(path));
+        }
+        catch (Exception ex)
+        {
+            _mapView.SetMessage($"地図データを読み込めません: {ex.Message}");
+        }
+    }
+
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -269,28 +285,34 @@ public sealed class MainForm : Form
     private void AddQuake(QuakeInfo q, bool notify)
     {
         if (!_seenQuake.Add(q.Id)) return;
+        // 同じ分に出た情報 (震度速報→震源情報→各地の震度) は1件にまとめる。
+        // 震源名がどちらにもあって違う場合は、別の地震として扱う。
+        var minute = MinuteOf(q.Time);
+        for (var i = 0; i < _list.Items.Count; i++)
+        {
+            for (var j = 0; j < _list.Items.Count; j++)
+            {
+                if (_list.Items[j] is not QuakeInfo old || MinuteOf(old.Time) != minute) continue;
+                if (old.Hypocenter.Length > 0 && q.Hypocenter.Length > 0 && old.Hypocenter != q.Hypocenter) continue;
 
-        var item = new ListViewItem(new[]
-        {
-            q.Time.Length >= 16 ? q.Time[..16] : q.Time,
-            string.IsNullOrEmpty(q.Hypocenter) ? $"({q.IssueLabel})" : q.Hypocenter,
-            q.Magnitude is { } m ? m.ToString("0.0") : "-",
-            q.Depth is { } d ? (d == 0 ? "ごく浅い" : $"{d}km") : "-",
-            q.ShindoText,
-        })
-        {
-            BackColor = Shindo.ColorFromScale(q.MaxScale),
-            ForeColor = q.MaxScale is >= 55 or (>= 30 and < 40) ? Color.White : Color.Black,
-        };
-        _list.Items.Insert(0, item);
-        while (_list.Items.Count > 100) _list.Items.RemoveAt(_list.Items.Count - 1);
-
-        if (notify && q.MaxScale >= NotifyMinScale)
-        {
-            _tray.ShowBalloonTip(8000, $"{q.IssueLabel} 最大震度{q.ShindoText}",
-                string.IsNullOrEmpty(q.Hypocenter) ? q.Time : $"{q.Hypocenter}  M{q.Magnitude:0.0}", ToolTipIcon.Info);
-            System.Media.SystemSounds.Asterisk.Play();
+                var merged = old.MergeWith(q);
+                _list.Items[j] = merged;
+                if (notify && merged.MaxScale >= NotifyMinScale && old.MaxScale < NotifyMinScale) NotifyQuake(merged);
+                return;
+            }
         }
+
+        _list.Items.Insert(0, q);
+        while (_list.Items.Count > 100) _list.Items.RemoveAt(_list.Items.Count - 1);
+        if (notify && q.MaxScale >= NotifyMinScale) NotifyQuake(q);
+    }
+
+    private static string MinuteOf(string time) => time.Length >= 16 ? time[..16] : time;
+    private void NotifyQuake(QuakeInfo q)
+    {
+        _tray.ShowBalloonTip(8000, $"{q.IssueLabel} 最大震度{q.ShindoText}",
+            string.IsNullOrEmpty(q.Hypocenter) ? q.Time : $"{q.Hypocenter}  M{q.Magnitude:0.0}", ToolTipIcon.Info);
+        System.Media.SystemSounds.Asterisk.Play();
     }
 
     // ---------------------------------------------------------------- UI更新
@@ -311,8 +333,8 @@ public sealed class MainForm : Form
         else
         {
             _eewActive = false;
-            _eewLabel.BackColor = Color.FromArgb(40, 44, 52);
-            _eewLabel.Text = eew is { IsCancel: true } ? "緊急地震速報: 取り消されました" : "緊急地震速報: なし";
+            _eewLabel.BackColor = Color.FromArgb(210, 40, 44, 52);
+            _eewLabel.Text = eew is { IsCancel: true } ? "緊急地震速報は取り消されました" : "緊急地震速報は発表されていません";
         }
 
         var kt = _kmoniTime == DateTime.MinValue ? "--:--:--" : _kmoniTime.ToString("HH:mm:ss");

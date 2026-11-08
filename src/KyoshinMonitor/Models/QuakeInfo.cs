@@ -9,6 +9,18 @@ public sealed record QuakeInfo(
     string IssueType)
 {
     public string ShindoText => Shindo.FromScale(MaxScale);
+    /// <summary>同じ地震の続報を取り込む。空/不明の項目は既存の値を残す。</summary>
+    public QuakeInfo MergeWith(QuakeInfo other) => this with
+    {
+        Id = other.Id,
+        Time = string.IsNullOrEmpty(other.Time) ? Time : other.Time,
+        Hypocenter = other.Hypocenter.Length > 0 ? other.Hypocenter : Hypocenter,
+        Magnitude = other.Magnitude ?? Magnitude,
+        Depth = other.Depth ?? Depth,
+        MaxScale = Math.Max(MaxScale, other.MaxScale),
+        IssueType = other.IssueType,
+    };
+
  
     public static QuakeInfo? Parse(JsonElement r)
     {

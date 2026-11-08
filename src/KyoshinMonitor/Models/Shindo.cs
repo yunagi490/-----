@@ -1,15 +1,25 @@
 public static class Shindo
 {
+      public static string Badge(int scale) => scale switch
+    {
+        45 => "5-",
+        50 => "5+",
+        55 => "6-",
+        60 => "6+",
+        10 or 20 or 30 or 40 or 70 => FromScale(scale),
+        _ => "?",
+    };
+
     public static string FromScale(int scale) => scale switch
     {
         10 => "1",
         20 => "2",
         30 => "3",
         40 => "4",
-        45 => "5弱",
-        50 => "5強",
-        55 => "6弱",
-        60 => "6強",
+        45 => "5-",
+        50 => "5+",
+        55 => "6-",
+        60 => "6+",
         70 => "7",
         _ => "不明",
     };
