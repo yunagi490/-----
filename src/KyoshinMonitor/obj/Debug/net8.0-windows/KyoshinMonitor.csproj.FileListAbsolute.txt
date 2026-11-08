@@ -1,0 +1,14 @@
+G:\Git\強震モニタ\src\KyoshinMonitor\bin\Debug\net8.0-windows\KyoshinMonitor.exe
+G:\Git\強震モニタ\src\KyoshinMonitor\bin\Debug\net8.0-windows\KyoshinMonitor.deps.json
+G:\Git\強震モニタ\src\KyoshinMonitor\bin\Debug\net8.0-windows\KyoshinMonitor.runtimeconfig.json
+G:\Git\強震モニタ\src\KyoshinMonitor\bin\Debug\net8.0-windows\KyoshinMonitor.dll
+G:\Git\強震モニタ\src\KyoshinMonitor\bin\Debug\net8.0-windows\KyoshinMonitor.pdb
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.GeneratedMSBuildEditorConfig.editorconfig
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.AssemblyInfoInputs.cache
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.AssemblyInfo.cs
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.csproj.CoreCompileInputs.cache
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.dll
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\refint\KyoshinMonitor.dll
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.pdb
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\KyoshinMonitor.genruntimeconfig.cache
+G:\Git\強震モニタ\src\KyoshinMonitor\obj\Debug\net8.0-windows\ref\KyoshinMonitor.dll
